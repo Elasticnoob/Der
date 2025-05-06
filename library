@@ -1,1 +1,223 @@
+-- Owner/Slave System - Main Script (No Debug)
+-- Owner username
+local OWNER = "16810y"
 
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Variables
+local LocalPlayer = Players.LocalPlayer
+local isSlave = LocalPlayer.Name ~= OWNER
+local chatLogs = {}
+local tpwalking = false
+
+-- Smart name matching function
+local function findPlayerByPartialName(partialName)
+    partialName = partialName:lower()
+    
+    -- First try exact match
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Name:lower() == partialName then
+            return player
+        end
+    end
+    
+    -- Then try contains match
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Name:lower():find(partialName, 1, true) then
+            return player
+        end
+    end
+    
+    return nil
+end
+
+-- Function to log chat messages silently
+local function logChat(player, message)
+    local timestamp = os.date("%H:%M:%S")
+    local logEntry = {
+        player = player.Name,
+        message = message,
+        timestamp = timestamp,
+        isOwner = player.Name == OWNER
+    }
+    
+    table.insert(chatLogs, logEntry)
+    
+    -- Keep log size manageable
+    if #chatLogs > 100 then
+        table.remove(chatLogs, 1)
+    end
+    
+    return logEntry
+end
+
+-- Teleport function
+local function teleportTo(targetCFrame)
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = targetCFrame
+    end
+end
+
+-- TPWalk functionality
+local function enableTPWalk(speed)
+    tpwalking = true
+    local chr = LocalPlayer.Character
+    local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+    
+    -- Create a loop that runs while tpwalking is true
+    spawn(function()
+        while tpwalking and chr and hum and hum.Parent do
+            local delta = RunService.Heartbeat:Wait()
+            if hum.MoveDirection.Magnitude > 0 then
+                if speed and tonumber(speed) then
+                    chr:TranslateBy(hum.MoveDirection * tonumber(speed) * delta * 10)
+                else
+                    chr:TranslateBy(hum.MoveDirection * delta * 10)
+                end
+            end
+        end
+    end)
+end
+
+-- Function to process commands
+local function processCommand(player, message)
+    -- Only process commands from the owner
+    if player.Name ~= OWNER then return end
+    
+    -- Check if message is a command
+    if message:sub(1, 1) ~= "." then return end
+    
+    local command = message:sub(2):lower() -- Remove the "." and convert to lowercase
+    
+    -- Handle bring commands
+    if command == "bring all" then
+        if isSlave then
+            -- Teleport to owner if we're a slave
+            local ownerPlayer = Players:FindFirstChild(OWNER)
+            if ownerPlayer and ownerPlayer.Character and ownerPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                teleportTo(ownerPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
+            end
+        end
+        return true
+    elseif command:sub(1, 5) == "bring " then
+        local targetName = command:sub(6)
+        -- If we're a slave and our name matches the target
+        if isSlave then
+            local partialMatch = findPlayerByPartialName(targetName)
+            if partialMatch and LocalPlayer.Name == partialMatch.Name then
+                local ownerPlayer = Players:FindFirstChild(OWNER)
+                if ownerPlayer and ownerPlayer.Character and ownerPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    teleportTo(ownerPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3))
+                end
+            end
+        end
+        return true
+    end
+    
+    -- Handle tpwalk commands
+    if command:sub(1, 6) == "tpwalk" then
+        if isSlave then
+            local speed = command:sub(8) -- Get speed if provided
+            enableTPWalk(speed)
+        end
+        return true
+    elseif command == "untpwalk" then
+        if isSlave then
+            tpwalking = false
+        end
+        return true
+    end
+    
+    -- Handle stop commands
+    if command == "stop all" then
+        if isSlave then
+            tpwalking = false
+            -- Any other actions that need to be stopped
+        end
+        return true
+    elseif command:sub(1, 5) == "stop " then
+        local targetName = command:sub(6)
+        if isSlave then
+            local partialMatch = findPlayerByPartialName(targetName)
+            if partialMatch and LocalPlayer.Name == partialMatch.Name then
+                tpwalking = false
+                -- Any other actions that need to be stopped
+            end
+        end
+        return true
+    end
+    
+    -- Handle say commands
+    if command:sub(1, 3) == "say " or command:sub(1, 3) == "sa " then
+        local content = command:sub(4)
+        local spaceLoc = content:find(" ")
+        
+        if spaceLoc then
+            local target = content:sub(1, spaceLoc-1)
+            local text = content:sub(spaceLoc+1)
+            
+            if target == "all" then
+                if isSlave then
+                    game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer(text, "All")
+                end
+            else
+                if isSlave then
+                    local partialMatch = findPlayerByPartialName(target)
+                    if partialMatch and LocalPlayer.Name == partialMatch.Name then
+                        game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer(text, "All")
+                    end
+                end
+            end
+        end
+        return true
+    end
+    
+    return false
+end
+
+-- Set up chat logger silently
+local function setupChatLogger()
+    -- Method 1: Using PlayerChatted (might not work in all games due to FilteringEnabled)
+    Players.PlayerChatted:Connect(function(chatType, player, message)
+        local log = logChat(player, message)
+        processCommand(player, message)
+    end)
+    
+    -- Method 2: Using Chat messages object (more reliable)
+    local Chat = game:GetService("Chat")
+    Chat.Chatted:Connect(function(part, message, color)
+        local player = Players:GetPlayerFromCharacter(part.Parent)
+        if player then
+            local log = logChat(player, message)
+            processCommand(player, message)
+        end
+    end)
+    
+    -- Method 3: Using TextChatService (for newer chat system)
+    pcall(function()
+        local TextChatService = game:GetService("TextChatService")
+        TextChatService.MessageReceived:Connect(function(textChatMessage)
+            local player = Players:FindFirstChild(textChatMessage.TextSource.Name)
+            if player then
+                local message = textChatMessage.Text
+                local log = logChat(player, message)
+                processCommand(player, message)
+            end
+        end)
+    end)
+    
+    -- Connect to PlayerAdded to track new players silently
+    Players.PlayerAdded:Connect(function(player)
+        -- Silent player tracking
+    end)
+    
+    -- Track when players leave silently
+    Players.PlayerRemoving:Connect(function(player)
+        -- Silent player removal tracking
+    end)
+end
+
+-- Start the system silently
+setupChatLogger()
